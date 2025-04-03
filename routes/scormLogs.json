@@ -1,0 +1,45 @@
+{
+  "SST123": {
+    "message": "SCORM Data Initialized",
+    "launchFileUrl": "/uploads/1743594343235/scormcontent/index.html",
+    "log": {
+      "cmi": {
+        "suspend_data": "",
+        "launch_data": "",
+        "comments": "",
+        "comments_from_lms": "",
+        "core": {
+          "student_id": "SST123",
+          "student_name": "Student",
+          "lesson_location": "",
+          "credit": "",
+          "lesson_status": "completed",
+          "entry": "",
+          "lesson_mode": "normal",
+          "exit": "",
+          "session_time": "00:00:00",
+          "score": {
+            "raw": "",
+            "min": "",
+            "max": "100"
+          },
+          "total_time": "00:00:00"
+        },
+        "objectives": {},
+        "student_data": {
+          "mastery_score": "",
+          "max_time_allowed": "",
+          "time_limit_action": ""
+        },
+        "student_preference": {
+          "audio": "",
+          "language": "",
+          "speed": "",
+          "text": ""
+        },
+        "interactions": {}
+      }
+    }
+  },
+  "undefined": {}
+}

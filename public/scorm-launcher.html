@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCORM Integration</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background-color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        iframe {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+            border: none;
+        }
+        .message {
+            color: #333;
+            text-align: center;
+            font-size: 1.2em;
+            display: none;
+        }
+        #main {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+        }
+    </style>
+    <script src="scorm-again.min.js"></script>
+    <!-- <script src="../routes/scormRoutes.js"></script> -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            if (typeof Scorm12API === "undefined") {
+                console.error("SCORM API not loaded.");
+                showMessage("Error: SCORM API not loaded.");
+                return;
+            }
+            loadScormCourse();
+        });
+
+        function loadScormCourse() {
+            const mainContainer = document.getElementById("main");
+            const loader = document.getElementById("loader");
+            loader.style.display = "block";
+
+            function getQueryParameter(param) {
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get(param);
+            }
+
+            const launchUrl = getQueryParameter('launchUrl');
+            const userId = getQueryParameter('userId');
+
+            if (!launchUrl || !userId) {
+                showMessage("Error: Missing SCORM course URL or User ID");
+                return;
+            }
+        
+            const apiUrl = "http://localhost:3000";
+
+            const apiSettings = {
+                lmsCommitUrl: `${apiUrl}/${userId}/set-log`,
+                logLevel: 1,
+                autocommitSeconds: 5,
+                autocommit: true,
+                asyncCommit: true,
+                xhrWithCredentials: false,
+                xhrHeaders: { Accept: "application/json" },
+                responseHandler: res => {
+                    if (res.status === 406) {
+                        alert("Please login");
+                        window.close();
+                    }
+                }
+            };
+
+            fetch(`${apiUrl}/${userId}/get-log`, {
+                method: "GET",
+                headers: { Accept: "application/json" }
+            })
+            .then(response => {
+                if (response.status === 200) {
+                    return response.json();
+                } else {
+                    throw new Error("Failed to retrieve data");
+                }
+            })
+            .then(result => {
+                initializeScormAPI("1.2", userId, "Student", apiSettings, result);
+                const iframe = document.getElementById("scormFrame");
+                iframe.src = launchUrl;
+                iframe.style.display = "block";
+            })
+            .catch(error => {
+                showMessage(`Error: ${error.message}`);
+            })
+            .finally(() => {
+                loader.style.display = "none";
+            });
+        }
+
+        function initializeScormAPI(version, userId, studentName, apiSettings, result) {
+            if (version === "1.2") {
+                window.API = new window.Scorm12API(apiSettings);
+                window.API.cmi.core.student_id = userId;
+                window.API.cmi.core.student_name = studentName;
+                window.API.cmi.core.lesson_location = '';
+            }
+            // } else if (version === "2004") {
+            //     window.API = new window.Scorm2004API(apiSettings);
+            //     window.API.cmi.learner_id = userId;
+            //     window.API.cmi.learner_name = studentName;
+            //     window.API.cmi.location = 'hi123';
+            // }
+
+            if (!window.API) {
+                // console.log(window.API)
+                alert("Error: SCORM API failed to initialize. Please try reloading the page.");
+                console.error("SCORM API failed to initialize.");
+            
+            return;
+            }
+
+            // Ensure SCORM API is available in the parent window
+            window.parent.API = window.API;  // Ensure API is accessible
+
+            // Ensure the iframe can access the API
+            const iframe = document.getElementById("scormFrame");
+            if (iframe.contentWindow) {
+                iframe.contentWindow.API = window.API;
+            }
+
+            if (result && result.cmi) {
+                window.API.loadFromJSON(result.cmi);
+            }
+
+            // Hook SCORM LMS API calls
+            window.API.on("LMSCommit", () => commitData(userId));
+            window.API.on("LMSSetValue.cmi.core.score.raw", (score) => setScore(userId, score));
+            window.API.on("LMSSetValue.cmi.core.lesson_status", (status) => {
+                if (status === "passed") setPassed(userId);
+                if (status === "failed") setFailed(userId);
+            });
+            window.API.on("LMSSetValue.cmi.core.lesson_location", (bookmark) => setBookmark(userId, bookmark));
+            window.API.on("LMSFinish", () => {
+                // Ensure final data is committed before terminating
+                const finalData = {cmi: window.API.cmi};
+                
+                return fetch(`http://localhost:3000/${userId}/set-log`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(finalData),
+                })
+                .then(response => response.json())
+                .then(result => {
+                    console.log('Final Commit Success:', result);
+                    return true; // Success
+                })
+                .catch(error => {
+                    console.error('Final Commit Error:', error);
+                    return false; // Failure
+                });
+            });
+
+            console.log("SCORM API Initialized and linked to iframe.");
+        }
+
+        function commitData(userId) {
+            if (window.API) {
+                // Simulating a SCORM-like API for accessing lesson data
+                const data = {
+                    studentId: userId,
+                    lessonLocation: window.API.GetValue("cmi.core.lesson_location"),
+                    lessonStatus: window.API.GetValue("cmi.core.lesson_status"),
+                    score: window.API.GetValue("cmi.core.score.raw"),
+                    timeSpent: window.API.GetValue("cmi.core.session_time"),
+                };
+
+                // Send the data to LMS
+                sendToLMS(data);
+            } else {
+                console.error('SCORM API (window.API) is not available.');
+            }
+            fetch(`http://localhost:3000/${userId}/set-log`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({cmi: window.API.cmi}),  // Send the complete CMI object
+            })
+            .then(response => response.json())
+            .then(result => console.log('CommitData Success:', result))
+            .catch(error => console.error('CommitData Error:', error));
+        }
+
+        function SetScore(userId, score) {
+            if (!userId || score === undefined) {
+                console.error("SetScore Error: Missing userId or score");
+                return;
+            }
+
+            console.log(`Sending score: userId=${userId}, score=${score}`); // Debug log
+
+            setValue("cmi.score.raw", score);
+            setValue("cmi.score.min", 0);
+            setValue("cmi.score.max", 100);
+            commit();
+
+            fetch(`http://localhost:3000/set-score`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, score })
+            })
+            .then(res => res.json())
+            .then(data => console.log("Score Set Successfully:", data))
+            .catch(err => console.error("Fetch Error:", err));
+        }
+
+
+        function setDataChunk(data) {
+            let api = window.API;
+            if (!api) {
+                console.warn("SCORM API not available for SetDataChunk.");
+                return;
+            }
+            api.LMSSetValue("cmi.suspend_data", data);
+            api.LMSCommit("");
+        }
+
+        function setPassed(userId) {
+            fetch(`http://localhost:3000/set-passed`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId })
+            })
+            .then(res => res.json())
+            .then(data => console.log("Course Passed:", data))
+            .catch(err => console.error("Pass Error:", err));
+        }
+
+        function setFailed(userId) {
+            fetch(`http://localhost:3000/set-failed`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId })
+            })
+            .then(res => res.json())
+            .then(data => console.log("Course Failed:", data))
+            .catch(err => console.error("Fail Error:", err));
+        }
+
+
+        function setBookmark(userId, bookmark) {
+            fetch(`http://localhost:3000/set-bookmark`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, bookmark })
+            })
+            .then(res => res.json())
+            .then(data => console.log("Bookmark Set:", data))
+            .catch(err => console.error("Bookmark Error:", err));
+        }
+
+        function showMessage(msg) {
+            const message = document.querySelector(".message");
+            message.innerText = msg;
+            message.style.display = "block";
+        }
+        
+    </script>
+</head>
+<body>
+    <div id="main">
+        <div id="loader">
+            <p>Loading SCORM course...</p>
+        </div>
+        <p class="message"></p>
+        <iframe id="scormFrame" width="100%" height="600px"></iframe>
+    </div>
+</body>
+</html>
